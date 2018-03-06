@@ -1,0 +1,254 @@
+---
+title: "day2"
+author: "Archit"
+date: "1 March 2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("tm")
+library(tm)
+library(dplyr)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(RWeka)
+#install.packages("RWeka")
+#install.packages("rJava")
+reviews<-read.csv( "C:/Users/Administrator/Desktop/Unstructured data/amazon_reviews_11.csv")
+dim(reviews)
+
+```
+
+```{r}
+
+docs <- VCorpus(VectorSource(na.omit(reviews$reviewText)))
+docs
+inspect(docs[[1]])
+```
+
+##Transformations
+```{r}
+#toloweris part of r package and not of tm,therfore we need to use a wrapper contemt_transformer for it 
+corpus_clean <- tm_map(docs,content_transformer(tolower))
+
+#rempve stopwords
+corpus_clean <- tm_map(corpus_clean,removeWords,stopwords())
+custom_stop_words <- c("amazon","got")
+corpus_clean <- tm_map(corpus_clean,removeWords,custom_stop_words)
+
+#Apply reg expressions
+apply_regex <- function(x) gsub('[^a-z ]','',x)##space after a-z for space
+corpus_clean<- tm_map(corpus_clean,content_transformer(apply_regex))
+
+corpus_clean<-tm_map(corpus_clean,stripWhitespace)
+
+#stemming
+
+inspect(corpus_clean[[1]])
+
+
+```
+##Document Term Matrix
+```{r}
+
+dtm<- DocumentTermMatrix(corpus_clean) ##sparsity 99% means 99% are 0
+class(dtm)
+
+df_dtm<- as.data.frame(as.matrix(dtm))
+dim(df_dtm)
+View(df_dtm)
+
+#sparsity<-count(df_dtm[df_dtm==0,])/ncol(df_dtm)*nrow(df_dtm)
+
+```
+
+```{r}
+bow<- as.data.frame(sort(colSums(df_dtm),decreasing = TRUE))
+
+#View(bow)
+
+bow$words <- rownames(bow)
+names(bow) <- c('Freq','words')
+
+```
+
+
+###wordcloud
+```{r}
+bow_top <- head(bow,50)
+wordcloud(bow_top$words,bow_top$Freq,colors =brewer.pal(7,"Dark2"),random.order = F )
+```
+##To find the longest review
+```{r}
+row_words<-as.data.frame(sort(rowSums(df_dtm),decreasing = T))
+#View(row_words)
+
+
+names(row_words)<-c('freq')
+row_words$doc_id <-rownames(row_words)
+
+boxplot(row_words$freq)
+
+
+```
+
+#To find longest Review
+```{r}
+doc_length<-as.data.frame(rowSums(df_dtm))
+names(doc_length)= c("freq")
+doc_length$doc_id=rownames(doc_length)
+#View(doc_length)
+boxplot(doc_length$freq)
+
+doc_length%>%arrange(-freq)%>%head(5)
+```
+#Finding the words in dtm
+```{r}
+colSums(df_dtm%>%select(crap,worst,poor,bad,waste,good,best,sexy,awesome,excellent))
+```
+#Bigrams
+```{r}
+BigramTokenizer<-function(x) NGramTokenizer(x,Weka_control(min=2,max=2))
+dtm_bigram<- DocumentTermMatrix(corpus_clean,control = list(tokenize=BigramTokenizer))
+df_dtm_bigram= as.data.frame(as.matrix(dtm_bigram))
+
+#View(df_dtm_bigram[,1:10])
+dim(df_dtm_bigram)
+```
+#Bigram Wordcloud
+```{r}
+bow_bigram=as.data.frame(sort(colSums(df_dtm_bigram),decreasing = T))
+bow_bigram$words=rownames(bow_bigram)
+names(bow_bigram)=c("freq","words")
+bow_bigram_top=head(bow_bigram,50)
+wordcloud(bow_bigram_top$words,bow_bigram_top$freq)
+```
+#Looking words in Bigram
+```{r}
+good_words <- c('excellent','good','awesome','decent')
+bad_words <- c('bad','worst')
+bigrams <- colnames(df_dtm_bigram)
+
+bigrams_interested <- c()
+
+for(bigram in bigrams)
+{
+ words_bigram <- (unlist(strsplit(bigram, ' ')))
+ 
+ if(length(intersect(good_words,words_bigram))>0)
+ {
+   bigrams_interested <- c(bigrams_interested,bigram)
+ }
+}
+
+#View(as.data.frame(sort(colSums(df_dtm_bigram[,bigrams_interested]),decreasing=T)))
+```
+
+#Word similarity
+```{r}
+#install.packages("lsa")
+library(lsa)
+
+
+words_similarity <- function(ip_word){
+  words_list<-c()
+  words_cosine<-c()
+  for(word in colnames(df_dtm)){
+    if(word!=ip_word){
+  
+    curr_cosine<-cosine(df_dtm[,ip_word],df_dtm[,word])
+    words_list<-c(words_list,word)
+    words_cosine<-c(words_cosine,curr_cosine)
+    }
+  }
+  
+  df_words <- data.frame(words=words_list,cosine =words_cosine)  
+  result <- df_words%>%arrange(-cosine)%>%head(5)
+  return(result)
+}
+  
+words_similarity("bag")
+```
+
+#Document Similarity
+```{r}
+tdm <- TermDocumentMatrix(corpus_clean)
+df_tdm <- as.data.frame(as.matrix(tdm))
+
+documents_similar <-function(doc_no){
+    docs_num <-c()
+    docs_cos <-c()
+    
+    for(doc in colnames(df_tdm[1:10])){
+        if(doc!=doc_no){
+        curr_cos <- cosine(df_tdm[,doc_no],df_tdm[,doc])
+        
+        docs_num <- c(docs_num,doc)
+        docs_cos<- c(docs_cos,curr_cos)
+        }
+    }
+result <- data.frame(doc_num = docs_num,cosine = docs_cos)
+result <- result%>%arrange(-cosine)%>%head(5)
+return(result)
+}
+
+documents_similar(10)
+
+```
+
+#document clustering
+```{r}
+doc_clust_model<-kmeans(df_dtm,centers = 5,nstart = 5)
+barplot(table(doc_clust_model$cluster))
+
+#feature reduction since tehre are too many colunns
+# 1]take top 20 pc's
+# 2]top 20 words based on frequency
+
+top_20words<-head(sort(colSums(df_dtm),decreasing = T),20)
+
+reduced_doc_clust_model <- kmeans(df_dtm[,names(top_20words)],5,nstart=10)
+
+
+barplot(table(reduced_doc_clust_model$cluster))
+```
+
+#Words clustering
+```{r}
+model <- kmeans(df_tdm,5)
+result <- data.frame(words=rownames(df_tdm),
+                     cluster = model$cluster,
+                     freq=rowSums(df_tdm))
+View(result%>% filter(cluster==1))
+write.csv(result,'words_cluster.csv',row.names = F)
+
+
+wss <- sapply(1:15, 
+              function(k){kmeans(df_dtm, k, nstart=5)$tot.withinss})
+plot(1:15,wss,type="b")
+```
+
+
+
+##max value in 
+```{r}
+which.max(apply(df_dtm,2, max))
+!df_dtm$nook==4732
+i=1
+j=1
+
+head(df_dtm)
+df_dtm[1,"nook"]
+
+colnames(df_dtm[df_dtm==51,])
+
+
+
+```
+
+
