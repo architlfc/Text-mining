@@ -1,0 +1,97 @@
+install.packages("Rfacebook")
+library("Rfacebook")
+#App Tokens(developers.facebook)
+#click get started ->settings and then basic
+app_id <- "**********"
+app_secret <-"******"
+
+#Generate token which is valid for 2 hours
+#link:"https://developers.facebook.com/tools/explorer"
+token <-"************************"
+
+#settings basic ->app domains ->localost and site url the localhost url
+#product->facebook login settings ->localhost 1410 
+#Authentication
+fb_ouath <- fbOAuth(app_id,app_secret,extended_permissions=TRUE)
+
+##get you fb data
+getUsers("me",token=fb_ouath)
+getUsers("me",token,private_info = TRUE)
+
+#Update status
+updateStatus("Updating status Using facebook APUI and R:",token=fb_ouath)
+
+#pages i liked
+my_likes <- getLikes(user="me",token = fb_ouath)
+View(my_likes)
+
+#serach pages
+pages <- searchPages(string = "Narendra Modi",token = fb_ouath,n=1000)
+View(pages)
+
+#get details about a specific page
+getpagedata <- getPage(387328308120544,token=fb_ouath,n=200)
+View(getpagedata)
+
+#get details about a specific post
+post_details <- getPost("387328308120544_816820361838001",token =fb_ouath,comments = T,likes = F)
+class(post_details)
+names(post_details)
+View(post_details)
+View(post_details$likes)#View deails aboyt people who liked
+View(post_details$comments)#View details aboyt people who commented
+
+
+
+write.csv(pages,"modi_fb.csv",row.names=FALSE)
+getwd()
+
+#https://www.darrinward.com/lat-long/
+
+
+######Sentimemt Analysis
+
+#pacage by default having bad words and good words
+install.packages("RSentiment")
+library(RSentiment)
+#Works on the algo sentiment polarity
+#n(positve words)-n(negative words) =polarity
+#we can decide upon the range of polarity for each class
+calculate_sentiment(c('I love India',"piece of trash","i will kill you"))
+
+calculate_score(c("I love india.Its is a developing country","I hate pakistan. They are a bunch of retards"))
+
+post_details$comments$sentiment <- calculate_sentiment(post_details$comments$message)
+table(post_details$comments$sentiment)
+View(post_details)
+
+#get senti score
+sentiments <-c()
+for(comment in post_details$comments$message){
+    sentiments <- c(sentiments,calculate_score(comment))
+}
+
+length(sentiments)
+length(post_details$comments$message)
+table(sentiments)
+
+#sort(table(post_details$comments$sentiment$sentiment),decreasing = TRUE)
+
+df_comments <-post_details$comments
+df_comments$senti_score <- sentiments
+View(df_comments)
+df_comments$se
+library(dplyr)
+df1_comments<-df_comments %>% mutate(senti_ment =case_when(senti_score>0~"Positive",
+                                                       senti_score==0~"Neutral",
+                                                       senti_score<0~"Negative"
+                                                       ))
+table(df_comments$sentiment)
+install.packages("lubridate")
+library(lubridate)
+#convert into datetime format
+df_comments$hour <-format(strptime(df_comments$created_time,"%Y-%m-%dT%H:%M:%S"),"%H")
+senti_summary <- df_comments%>% group_by(hour)%>%summarise(n=n())
+View(df_comments$sentiment)
+
+ggplot(senti_summary,aes(hour))
